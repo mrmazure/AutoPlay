@@ -1,1 +1,34 @@
-export const Queue=(()=>{let e=[];return{add(l){e.push(...l)},next:()=>e.shift()||null,peek:()=>e[0]||null,all:()=>e,remove(l){e.splice(l,1)},set(l){e=l},shuffle(){for(let l=e.length-1;l>0;l--){let t=Math.floor(Math.random()*(l+1));[e[l],e[t]]=[e[t],e[l]]}}}})();
+export const Queue = (() => {
+    let items = [];
+    let loopMode = false;
+    return {
+        add(list) { items.push(...list); },
+        next() {
+            if (!items.length) return null;
+            const item = items[0];
+            if (item._isFolder) {
+                const files = item._files;
+                if (!files.length) { items.shift(); return this.next(); }
+                const file = files[Math.floor(Math.random() * files.length)];
+                items.shift();
+                if (loopMode) items.push(item);
+                return file;
+            }
+            const picked = items.shift();
+            if (loopMode) items.push(picked);
+            return picked;
+        },
+        peek: () => items[0] || null,
+        all: () => items,
+        remove(idx) { items.splice(idx, 1); },
+        set(list) { items = list.filter(Boolean); },
+        shuffle() {
+            for (let i = items.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [items[i], items[j]] = [items[j], items[i]];
+            }
+        },
+        setLoop(v) { loopMode = v; },
+        isLoop() { return loopMode; }
+    };
+})();

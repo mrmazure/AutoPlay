@@ -425,6 +425,10 @@ body {
     font-weight: 800;
     color: var(--text-main);
     line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 }
 
 .time-display {
@@ -600,4 +604,22 @@ body {
 .aop-unlock {
     color: var(--text-muted);
     font-size: 0.82rem;
+}
+
+/* --- Dossier dans la playlist --- */
+.queue-folder {
+    border-left-color: var(--success);
+}
+
+.queue-folder .file-name {
+    color: var(--success);
+}
+
+/* --- Piste URL (M3U / PLS) --- */
+.queue-url-track {
+    border-left-color: #38bdf8;
+}
+
+.queue-url-track .file-name {
+    color: #38bdf8;
 }

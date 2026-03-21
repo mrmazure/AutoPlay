@@ -5,6 +5,11 @@ const STEP_MS = 50;
 const SIL_RMS = 0.06;
 const SIL_FRM = 10;
 const players = [document.getElementById("player1"), document.getElementById("player2")];
+// Dedicated player for stream URLs — intentionally NOT connected to Web Audio API
+// to avoid CORS-related muting (browsers silence cross-origin audio routed through
+// createMediaElementSource when the server doesn't send CORS headers).
+const playerStream = document.getElementById("player-stream");
+let streamActive = false;
 let active = 0;
 let masterVol = 1;
 let ctx = null;
@@ -47,6 +52,7 @@ function connectPlayer(audioEl) {
 
 export const setMasterVolume = (vol) => {
     masterVol = vol;
+    playerStream.volume = vol; // Always update directly (not routed through Web Audio)
     if (masterGain) {
         masterGain.gain.setTargetAtTime(vol, getCtx().currentTime, 0.1);
     } else {
@@ -63,10 +69,15 @@ export const fadeOut = (player) => new Promise((resolve) => {
         if (player.volume === 0) {
             clearInterval(interval);
             player.pause();
-            player.currentTime = 0;
             player.__fading = false;
-            // Restore volume for next time (assuming masterVol logic is handled by GainNode or reset here)
             player.volume = 1;
+            if (player === playerStream) {
+                // Clear src so the stream isn't kept alive and streamActive is reset
+                player.src = '';
+                streamActive = false;
+            } else {
+                player.currentTime = 0;
+            }
             resolve();
         }
     }, 50);
@@ -148,15 +159,62 @@ function observeSilence(player) {
 }
 
 function playNext(manual = false) {
-    const current = players[active];
-    if (manual && !current.paused) {
-        fadeOut(current);
+    // Fade out whatever is currently playing
+    if (manual) {
+        if (streamActive) {
+            fadeOut(playerStream);
+        } else {
+            const current = players[active];
+            if (!current.paused) fadeOut(current);
+        }
     }
 
     const nextFile = Queue.next();
     if (!nextFile) {
+        if (streamActive) {
+            playerStream.pause();
+            playerStream.src = '';
+            streamActive = false;
+        }
         document.dispatchEvent(new CustomEvent("trackclear"));
-        return null; // Stop
+        return null;
+    }
+
+    // --- Stream URL: use dedicated player, bypasses Web Audio (avoids CORS muting) ---
+    if (nextFile._isUrl) {
+        if (streamActive) {
+            playerStream.pause();
+            playerStream.src = '';
+        }
+        streamActive = true;
+
+        playerStream.src = nextFile._url;
+        playerStream.volume = masterVol;
+        playerStream.load();
+
+        // Some streams fire loadedmetadata, others don't — handle both
+        let metaFired = false;
+        const fireChange = (dur) => {
+            if (metaFired) return;
+            metaFired = true;
+            document.dispatchEvent(new CustomEvent('trackchange', {
+                detail: { file: nextFile, duration: dur }
+            }));
+        };
+        playerStream.onloadedmetadata = () => fireChange(playerStream.duration);
+        playerStream.oncanplay = () => fireChange(Infinity);
+        setTimeout(() => fireChange(Infinity), 4000); // final safety fallback
+
+        playerStream.play().catch(console.warn);
+        return nextFile;
+    }
+
+    // --- Regular file ---
+    // Stop stream if one was active
+    if (streamActive) {
+        playerStream.pause();
+        playerStream.src = '';
+        streamActive = false;
     }
 
     const nextPlayer = players[1 - active];
@@ -251,7 +309,7 @@ players.forEach(p => {
 });
 
 export const Player = {
-    getCurrent: () => players[active],
+    getCurrent: () => streamActive ? playerStream : players[active],
     playNext: playNext
 };
 
@@ -264,6 +322,7 @@ export const applyAudioOutput = async (deviceId) => {
     }
     if ('setSinkId' in HTMLAudioElement.prototype) {
         players.forEach(p => promises.push(p.setSinkId(deviceId).catch(() => {})));
+        promises.push(playerStream.setSinkId(deviceId).catch(() => {}));
     }
     if (promises.length > 0) await Promise.all(promises);
 };

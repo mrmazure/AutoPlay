@@ -9,7 +9,7 @@
     <meta content="summary_large_image" name="twitter:card">
     <meta content="https://autoplay.radiotools.be/seo_rtbe.png" name="twitter:image">
     <meta content="width=device-width, initial-scale=1" name="viewport">
-    <title>RadioBox – AutoPlay by MrMazure</title>
+    <title>RadioTools – AutoPlay by MrMazure</title>
     <link href="favicon.png" rel="icon" type="image/png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#6366f1">
@@ -47,6 +47,29 @@
                             <line x1="5" y1="12" x2="19" y2="12"></line>
                         </svg>
                     </button>
+                    <button id="add-folder-btn" title="Ajouter un dossier (fichier aléatoire)" class="icon-btn">
+                        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2"
+                            fill="none" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            <line x1="12" y1="11" x2="12" y2="17"></line>
+                            <line x1="9" y1="14" x2="15" y2="14"></line>
+                        </svg>
+                    </button>
+                    <button id="loop-playlist-btn" title="Conserver les fichiers après lecture (boucle)" class="icon-btn">
+                        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2"
+                            fill="none" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                        </svg>
+                    </button>
+                    <button id="add-stream-btn" title="Ajouter un flux streaming" class="icon-btn">
+                        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2"
+                            fill="none" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                        </svg>
+                    </button>
                     <button id="shuffle-btn" title="Mélanger les fichiers" class="icon-btn">
                         <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2"
                             fill="none" stroke-linecap="round" stroke-linejoin="round">
@@ -78,6 +101,9 @@
                 <div class="main-controls">
                     <button id="stop-end-btn" title="Activer/désactiver Auto next" class="control-btn toggle-btn">
                         <span class="icon">🔄</span> Auto next
+                    </button>
+                    <button id="loop-btn" title="Mode Boucle – la liste d'attente tourne en rotation non-stop" class="control-btn toggle-btn">
+                        <span class="icon">🔁</span> Boucle
                     </button>
                     <button id="stop-btn" title="Stop" class="control-btn stop-btn">
                         <span class="icon">⏹</span> STOP
@@ -123,6 +149,7 @@
 
             <audio id="player1"></audio>
             <audio id="player2"></audio>
+            <audio id="player-stream"></audio>
 
             <div id="history">
                 <h3 class="section-title">Historique</h3>

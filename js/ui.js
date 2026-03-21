@@ -25,10 +25,12 @@ const CUE_HIT_PX = 12;  // pixels tolerance to grab the marker
 export const UI = {
     renderQueue() {
         queue.innerHTML = "", e.all().forEach(((n, r) => {
+            const isFolder = !!n._isFolder;
+            const isUrl = !!n._isUrl;
             const o = document.createElement("li");
-            o.className = "queue-item", o.draggable = !0, o.innerHTML = `
-        <span class="file-name">${n.name}</span>
-        <span class="duration">${n._dur ? fmt(n._dur) : "--:--"}</span>
+            o.className = "queue-item" + (isFolder ? " queue-folder" : "") + (isUrl ? " queue-url-track" : ""), o.dataset.id = n._id, o.draggable = !0, o.innerHTML = `
+        <span class="file-name">${isFolder ? "📁 " : isUrl ? "🌐 " : ""}${n.name}</span>
+        <span class="duration">${isFolder ? n._files.length + " fich." : (n._dur && isFinite(n._dur) ? fmt(n._dur) : (isUrl ? "flux" : "--:--"))}</span>
         <button class="delete-btn">🗑</button>
       `;
             const i = document.createElement("button");
@@ -44,7 +46,10 @@ export const UI = {
             u.textContent = "❌", u.title = "Supprimer de la playlist", u.style.color = "red", u.onclick = t => {
                 t.stopPropagation(), e.remove(r), UI.renderQueue()
             }, o.insertBefore(i, u), o.addEventListener("dragstart", (() => o.classList.add("dragging"))), o.addEventListener("dragend", (() => o.classList.remove("dragging"))), queue.append(o)
-        })), hint.style.display = e.all().length ? "none" : "flex", upNext.textContent = (e.peek()?.name || "–")
+        }));
+        hint.style.display = e.all().length ? "none" : "flex";
+        const np = e.peek();
+        upNext.textContent = np ? (np._isFolder ? "📁 " + np.name + " (aléatoire)" : np.name) : "–";
     },
     async updateCurrent(e, n) {
         nowT.textContent = e.name, meta.dataset.total = n;
@@ -54,7 +59,16 @@ export const UI = {
         });
         hist.insertAdjacentHTML("afterbegin", `<li>${r} – ${e.name}</li>`);
 
+        // Flux live : masquer la progress bar
+        if (!isFinite(n)) {
+            progress.style.display = 'none';
+            currentWaveform = null;
+            setNextCuePct(null);
+            return;
+        }
+
         // Generate Waveform
+        progress.style.display = '';
         currentWaveform = null;
         setNextCuePct(0.93); // Fallback: ~93% while waveform loads
         // Draw placeholder
@@ -71,7 +85,7 @@ export const UI = {
         }
     },
     clearCurrent() {
-        nowT.textContent = "–", /* bar.style.width = "0%", */ meta.textContent = "", currentWaveform = null, setNextCuePct(null), drawWaveform(0)
+        nowT.textContent = "–", meta.textContent = "", currentWaveform = null, setNextCuePct(null), drawWaveform(0), progress.style.display = ''
     },
     tick() {
         const e = t.getCurrent();
@@ -79,24 +93,24 @@ export const UI = {
             // bar.style.width = "0%";
             if (!window.autoNext) UI.clearCurrent();
         } else if (e.duration) {
-            // NEXT cue trigger: fallback for foreground (primary is timeupdate in player.js).
-            // Read window.nextCuePct so that when timeupdate already fired and set it to
-            // null, this block is skipped and does not double-trigger playNext.
-            if (window.nextCuePct !== null && window.autoNext) {
-                const pct = e.currentTime / e.duration;
-                if (pct >= window.nextCuePct) {
-                    const prevPlayer = e;
-                    setNextCuePct(null);
-                    t.playNext(false);
-                    a(prevPlayer);
+            if (isFinite(e.duration)) {
+                // NEXT cue trigger: fallback for foreground (primary is timeupdate in player.js).
+                if (window.nextCuePct !== null && window.autoNext) {
+                    const pct = e.currentTime / e.duration;
+                    if (pct >= window.nextCuePct) {
+                        const prevPlayer = e;
+                        setNextCuePct(null);
+                        t.playNext(false);
+                        a(prevPlayer);
+                    }
                 }
+                const remaining = e.duration - e.currentTime;
+                meta.textContent = `Durée : ${fmt(meta.dataset.total || e.duration)} | Restant : ${fmt(remaining)}`;
+                drawWaveform(e.currentTime / e.duration);
+            } else {
+                // Flux live (durée infinie)
+                meta.textContent = `🔴 EN DIRECT | Écoulé : ${fmt(e.currentTime)}`;
             }
-
-            const remaining = e.duration - e.currentTime;
-            // bar.style.width = e.currentTime / e.duration * 100 + "%";
-            meta.textContent = `Durée : ${fmt(meta.dataset.total || e.duration)} | Restant : ${fmt(remaining)}`;
-
-            drawWaveform(e.currentTime / e.duration);
         }
         clock.textContent = (new Date).toLocaleTimeString("fr-FR", {
             hour: "2-digit",
@@ -345,6 +359,7 @@ queue.addEventListener("dragover", (e => {
 }));
 queue.addEventListener("drop", (t => {
     t.preventDefault();
-    const n = [...queue.querySelectorAll(".queue-item")].map((e => e.querySelector(".file-name").textContent));
-    e.set(n.map((t => e.all().find((e => e.name === t))))), UI.renderQueue()
+    const ids = [...queue.querySelectorAll(".queue-item")].map(li => li.dataset.id);
+    e.set(ids.map(id => e.all().find(item => item._id === id)));
+    UI.renderQueue();
 }));
