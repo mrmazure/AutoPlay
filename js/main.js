@@ -46,7 +46,7 @@ addStreamBtn.addEventListener('click', evt => {
     evt.stopPropagation();
     const url = prompt('URL du flux streaming (http:// ou https://) :');
     if (!url || !/^https?:\/\//i.test(url.trim())) return;
-    const name = prompt('Nom du flux :', decodeURIComponent(url.trim().split('/').pop().split('?')[0]) || url.trim()) ?? '';
-    e.add([{ _id: crypto.randomUUID(), name: name.trim() || url.trim(), _url: url.trim(), _dur: null, type: 'audio/mpeg', _isUrl: true }]);
+    // Pas de nom demandé : l'adresse du flux sert de nom dans la playlist.
+    e.add([{ _id: crypto.randomUUID(), name: url.trim(), _url: url.trim(), _dur: null, type: 'audio/mpeg', _isUrl: true }]);
     r.renderQueue();
 });

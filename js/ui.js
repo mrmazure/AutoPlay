@@ -126,10 +126,10 @@ export const UI = {
 /**
  * Detects where the fade-out begins at the end of a track,
  * following standard radio automation segue logic:
- *  - Only looks in the last 35% of the track
- *  - Scans backwards from the end to find the first sample
- *    where the level rises above a "loud" threshold (= start of fade-out)
- *  - Requires the drop to be sustained for at least SUSTAIN samples
+ *  - First handles "net"/hard-cut endings (song plays at full level right
+ *    up to the end then stops): the cue is placed at the true end so the
+ *    track plays out fully instead of being chopped at the 93% default.
+ *  - Otherwise looks for a real fade-out in the last 35% of the track.
  *  - Fallback: total_duration - 4 seconds (≈ 93% for a 3:30 track)
  *
  * @param {Float32Array} waveform  Normalised 0-1 amplitude samples
@@ -140,23 +140,48 @@ function detectFadeOutCue(waveform) {
 
     // Compute the average level of the "body" (first 60% of the track)
     // to get a reference loudness, ignoring intro/outro silence.
+    const bodyStart = Math.floor(n * 0.10);
     const bodyEnd = Math.floor(n * 0.60);
     let bodySum = 0;
-    for (let i = Math.floor(n * 0.10); i < bodyEnd; i++) bodySum += waveform[i];
-    const bodyAvg = bodySum / (bodyEnd - Math.floor(n * 0.10));
+    for (let i = bodyStart; i < bodyEnd; i++) bodySum += waveform[i];
+    const bodyAvg = bodySum / (bodyEnd - bodyStart);
 
     // Fade starts when the level drops below this fraction of the body average.
     const FADE_THRESHOLD = bodyAvg * 0.40; // 40 % of normal loudness
     // How many consecutive quiet samples confirm the fade (≈ 0.5 s at 800 samples/track)
     const SUSTAIN = Math.max(8, Math.floor(n * 0.010));
-    // Only search in the last 35% of the track
+
+    // ── True end of audio: skip trailing digital silence ──────────────
+    // Many files keep a fraction of a second of near-silence after the last
+    // note; ignore it so the cue lands on the actual end of the sound.
+    const SILENCE = bodyAvg * 0.10;
+    let audioEnd = n - 1;
+    while (audioEnd > bodyEnd && waveform[audioEnd] < SILENCE) audioEnd--;
+
+    // ── 1. Hard-cut ("fin nette") detection ───────────────────────────
+    // If the track is still at full level in the window just before the
+    // audio ends, there was no fade-out — the song stops abruptly. There is
+    // nothing to cross-fade into, so let it play out fully: place the cue
+    // right at the end (after trimming trailing silence). This avoids the
+    // 93% default firing the next track several seconds too early.
+    const tailWin = Math.max(SUSTAIN, Math.floor(n * 0.02));
+    let tailLoud = 0;
+    for (let i = Math.max(bodyEnd, audioEnd - tailWin + 1); i <= audioEnd; i++) {
+        if (waveform[i] >= FADE_THRESHOLD) tailLoud++;
+    }
+    if (tailLoud >= tailWin * 0.6) {
+        return Math.min(0.999, Math.max(0.80, (audioEnd + 1) / n));
+    }
+
+    // ── 2. Fade-out detection ─────────────────────────────────────────
+    // Only search in the last 35% of the track.
     const searchStart = Math.floor(n * 0.65);
 
     // Scan backwards: find the latest sample above threshold
     // (= the last "loud" moment before the fade-out)
     // Use -1 as sentinel so we can detect "nothing found in search window".
     let lastLoud = -1;
-    for (let i = n - 1; i >= searchStart; i--) {
+    for (let i = audioEnd; i >= searchStart; i--) {
         if (waveform[i] >= FADE_THRESHOLD) { lastLoud = i; break; }
     }
 
