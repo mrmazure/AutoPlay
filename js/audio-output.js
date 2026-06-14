@@ -1,14 +1,46 @@
 /**
  * RadioBox – AutoPlay | audio-output.js
- * Sélection de la carte son de sortie de l'automate.
+ * Sélection des cartes son de sortie.
+ *  - rôle « main »    : sortie de l'automate (antenne)
+ *  - rôle « preview » : sortie de pré-écoute (PFL), distincte de l'antenne
  * Inspiré de la méthode CartWall (FONCTIONNE/app.js).
  * Fonctionne sur Chrome (via AudioContext.setSinkId) et Firefox (via selectAudioOutput).
  */
 
-import { applyAudioOutput } from './player.js';
+import { applyAudioOutput, applyPreviewOutput } from './player.js';
 
-let selectedOutputDeviceId = localStorage.getItem('audioOutputDeviceId') || 'default';
-let selectedOutputLabel    = localStorage.getItem('audioOutputLabel')    || '';
+/* ── Définition des deux rôles ─────────────────────────────── */
+
+const ROLES = {
+    main: {
+        btnId:        'audioOutputBtn',
+        storeKey:     'audioOutputDeviceId',
+        labelKey:     'audioOutputLabel',
+        emoji:        '🔊',
+        emptyLabel:   'Par défaut',
+        title:        "Choisir la carte son de sortie de l'automate",
+        apply:        applyAudioOutput,
+    },
+    preview: {
+        btnId:        'previewOutputBtn',
+        storeKey:     'previewOutputDeviceId',
+        labelKey:     'previewOutputLabel',
+        emoji:        '🎧',
+        emptyLabel:   'Par défaut',
+        title:        'Choisir la carte son de pré-écoute (PFL)',
+        apply:        applyPreviewOutput,
+    },
+};
+
+// État courant par rôle
+const state = {};
+for (const role of Object.keys(ROLES)) {
+    const cfg = ROLES[role];
+    state[role] = {
+        deviceId: localStorage.getItem(cfg.storeKey) || 'default',
+        label:    localStorage.getItem(cfg.labelKey) || '',
+    };
+}
 
 /* ── Enumerate outputs ─────────────────────────────────────── */
 
@@ -20,30 +52,32 @@ async function enumerateOutputs() {
 
 /* ── Apply a device ────────────────────────────────────────── */
 
-async function applyDevice(deviceId, label) {
-    selectedOutputDeviceId = deviceId;
-    selectedOutputLabel    = label || '';
-    localStorage.setItem('audioOutputDeviceId', deviceId);
-    localStorage.setItem('audioOutputLabel',    selectedOutputLabel);
-    await applyAudioOutput(deviceId);
-    updateBtnLabel();
+async function applyDevice(role, deviceId, label) {
+    const cfg = ROLES[role];
+    state[role].deviceId = deviceId;
+    state[role].label    = label || '';
+    localStorage.setItem(cfg.storeKey, deviceId);
+    localStorage.setItem(cfg.labelKey, state[role].label);
+    await cfg.apply(deviceId);
+    updateBtnLabel(role);
 }
 
 /* ── Update button label ───────────────────────────────────── */
 
-function updateBtnLabel() {
-    const btn = document.getElementById('audioOutputBtn');
+function updateBtnLabel(role) {
+    const cfg = ROLES[role];
+    const btn = document.getElementById(cfg.btnId);
     if (!btn) return;
-    const short = selectedOutputLabel
-        ? selectedOutputLabel.replace(/\s*\(.*\)\s*$/, '').trim()
+    const short = state[role].label
+        ? state[role].label.replace(/\s*\(.*\)\s*$/, '').trim()
         : '';
-    btn.textContent = short ? `🔊 ${short}` : '🔊 Carte son de sortie';
-    btn.title = selectedOutputLabel || "Choisir la carte son de sortie de l'automate";
+    btn.textContent = short ? `${cfg.emoji} ${short}` : `${cfg.emoji} ${cfg.emptyLabel}`;
+    btn.title = state[role].label || cfg.title;
 }
 
 /* ── Populate panel ────────────────────────────────────────── */
 
-async function populateAudioOutputPanel(panel, anchorBtn) {
+async function populateAudioOutputPanel(role, panel, anchorBtn) {
     panel.innerHTML = '<div class="aop-msg">Détection des cartes son…</div>';
 
     const outputs = await enumerateOutputs();
@@ -67,13 +101,13 @@ async function populateAudioOutputPanel(panel, anchorBtn) {
     if (commDev) list.push({ deviceId: 'communications', label: commDev.label || 'Sortie de communication' });
 
     list.forEach(dev => {
-        const isActive = dev.deviceId === selectedOutputDeviceId;
+        const isActive = dev.deviceId === state[role].deviceId;
         const item = document.createElement('div');
         item.className = 'aop-item' + (isActive ? ' aop-active' : '');
         item.title = dev.label;
         item.innerHTML = `<span class="aop-check">${isActive ? '✓' : ''}</span><span class="aop-label">${dev.label}</span>`;
         item.addEventListener('click', async () => {
-            await applyDevice(dev.deviceId, dev.label);
+            await applyDevice(role, dev.deviceId, dev.label);
             panel.remove();
         });
         panel.appendChild(item);
@@ -93,9 +127,9 @@ async function populateAudioOutputPanel(panel, anchorBtn) {
             e.stopPropagation();
             try {
                 const device = await navigator.mediaDevices.selectAudioOutput();
-                await applyDevice(device.deviceId, device.label);
+                await applyDevice(role, device.deviceId, device.label);
                 panel.remove();
-                openAudioOutputPanel(anchorBtn);
+                openAudioOutputPanel(role, anchorBtn);
             } catch (_) { /* annulé */ }
         });
         panel.appendChild(btnBrowse);
@@ -113,7 +147,7 @@ async function populateAudioOutputPanel(panel, anchorBtn) {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 stream.getTracks().forEach(t => t.stop());
                 panel.remove();
-                openAudioOutputPanel(anchorBtn); // ré-ouvre avec les vrais noms
+                openAudioOutputPanel(role, anchorBtn); // ré-ouvre avec les vrais noms
             } catch (_) {
                 const errNote = document.createElement('div');
                 errNote.className = 'aop-msg';
@@ -127,12 +161,13 @@ async function populateAudioOutputPanel(panel, anchorBtn) {
 
 /* ── Open / close panel ────────────────────────────────────── */
 
-async function openAudioOutputPanel(anchorBtn) {
-    const existing = document.getElementById('audioOutputPanel');
+async function openAudioOutputPanel(role, anchorBtn) {
+    const panelId = `audioOutputPanel-${role}`;
+    const existing = document.getElementById(panelId);
     if (existing) { existing.remove(); return; }
 
     const panel = document.createElement('div');
-    panel.id = 'audioOutputPanel';
+    panel.id = panelId;
     panel.className = 'audio-output-panel';
     document.body.appendChild(panel);
 
@@ -141,7 +176,7 @@ async function openAudioOutputPanel(anchorBtn) {
     panel.style.top   = (rect.bottom + 6) + 'px';
     panel.style.right = (window.innerWidth - rect.right) + 'px';
 
-    await populateAudioOutputPanel(panel, anchorBtn);
+    await populateAudioOutputPanel(role, panel, anchorBtn);
 
     // Fermeture au clic extérieur
     setTimeout(() => {
@@ -157,20 +192,25 @@ async function openAudioOutputPanel(anchorBtn) {
 
 /* ── Init ──────────────────────────────────────────────────── */
 
-export function initAudioOutput() {
-    const btn = document.getElementById('audioOutputBtn');
+function initRole(role) {
+    const cfg = ROLES[role];
+    const btn = document.getElementById(cfg.btnId);
     if (!btn) return;
 
-    // Restaure le libellé sauvegardé
-    updateBtnLabel();
+    updateBtnLabel(role);
 
     btn.addEventListener('click', e => {
         e.stopPropagation();
-        openAudioOutputPanel(btn);
+        openAudioOutputPanel(role, btn);
     });
 
-    // Pré-applique le device sauvegardé (sera mémorisé si le contexte audio n'est pas encore créé)
-    if (selectedOutputDeviceId && selectedOutputDeviceId !== 'default') {
-        applyAudioOutput(selectedOutputDeviceId).catch(() => {});
+    // Pré-applique le device sauvegardé (mémorisé si le contexte audio n'est pas encore créé)
+    if (state[role].deviceId && state[role].deviceId !== 'default') {
+        cfg.apply(state[role].deviceId).catch(() => {});
     }
+}
+
+export function initAudioOutput() {
+    initRole('main');
+    initRole('preview');
 }

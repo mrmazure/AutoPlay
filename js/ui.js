@@ -1,6 +1,8 @@
 import { Queue as e } from "./queue.js";
 import { Player as t, fadeOut as a } from "./player.js";
-import { Waveform } from "./waveform.js";
+import { Waveform, detectFadeOutCue } from "./waveform.js";
+import { openMixEditor } from "./mix-editor.js";
+import { reconnectItem } from "./playlist-io.js";
 
 const $ = e => document.getElementById(e),
     queue = $("queue"),
@@ -13,9 +15,13 @@ const $ = e => document.getElementById(e),
     waveformCanvas = $("waveform"),
     meta = $("time-meta"),
     clock = $("clock"),
+    introCd = $("intro-countdown"),
     fmt = e => `${String(Math.floor(e / 60)).padStart(2, "0")}:${String(Math.floor(e % 60)).padStart(2, "0")}`;
 
 let currentWaveform = null;
+let currentIntroSec = null; // fin d'intro (s) de la piste en cours, null = aucune
+let introPct = null;        // position de l'intro (ratio 0-1), null = non affiché
+let fadeEndPct = null;      // fin du fondu de sortie (ratio 0-1), null = pas de fondu
 let nextCuePct = null;   // 0-1 ratio of track, null = inactive
 window.nextCuePct = null; // mirrored for cross-module access (player.js)
 function setNextCuePct(v) { nextCuePct = v; window.nextCuePct = v; }
@@ -24,45 +30,121 @@ const CUE_HIT_PX = 12;  // pixels tolerance to grab the marker
 
 export const UI = {
     renderQueue() {
-        queue.innerHTML = "", e.all().forEach(((n, r) => {
+        e.ensurePicks();
+        queue.innerHTML = "";
+        e.all().forEach((n, r) => {
             const isFolder = !!n._isFolder;
             const isUrl = !!n._isUrl;
-            const o = document.createElement("li");
-            o.className = "queue-item" + (isFolder ? " queue-folder" : "") + (isUrl ? " queue-url-track" : ""), o.dataset.id = n._id, o.draggable = !0, o.innerHTML = `
-        <span class="file-name">${isFolder ? "📁 " : isUrl ? "🌐 " : ""}${n.name}</span>
-        <span class="duration">${isFolder ? n._files.length + " fich." : (n._dur && isFinite(n._dur) ? fmt(n._dur) : (isUrl ? "flux" : "--:--"))}</span>
-        <button class="delete-btn">🗑</button>
-      `;
-            const i = document.createElement("button");
-            i.className = "play-item-btn", i.title = "Jouer immédiatement", i.textContent = "▶", i.onclick = n => {
-                n.stopPropagation();
-                const o = e.all(),
-                    i = o.splice(r, 1)[0];
-                e.set([i, ...o]);
-                const u = t.getCurrent();
-                u && !u.paused && a(u), t.playNext(), UI.renderQueue()
-            };
-            const u = o.querySelector(".delete-btn");
-            u.textContent = "❌", u.title = "Supprimer de la playlist", u.style.color = "red", u.onclick = t => {
-                t.stopPropagation(), e.remove(r), UI.renderQueue()
-            }, o.insertBefore(i, u), o.addEventListener("dragstart", (() => o.classList.add("dragging"))), o.addEventListener("dragend", (() => o.classList.remove("dragging"))), queue.append(o)
-        }));
+            const isMissing = !!n._placeholder; // fichier/dossier à recharger
+            const li = document.createElement("li");
+            li.className = "queue-item"
+                + (isFolder ? " queue-folder" : "")
+                + (isUrl ? " queue-url-track" : "")
+                + (isMissing ? " queue-missing" : "");
+            li.dataset.id = n._id;
+            li.draggable = true;
+
+            const icon = isMissing ? (n._kind === "folder" ? "📁 " : "📄 ")
+                : isFolder ? "📁 " : isUrl ? "🌐 " : "";
+            const durTxt = isMissing
+                ? (n._kind === "folder" ? (n._count || 0) + " fich." : (n._dur && isFinite(n._dur) ? fmt(n._dur) : "?"))
+                : isFolder ? n._files.length + " fich."
+                    : (n._dur && isFinite(n._dur) ? fmt(n._dur) : (isUrl ? "flux" : "--:--"));
+            const sub = isMissing
+                ? (n._needsPermission
+                    ? `<span class="folder-pick missing-note">🔌 à reconnecter (clique pour autoriser)</span>`
+                    : `<span class="folder-pick missing-note">⚠ à recharger (re-déposez le fichier)</span>`)
+                : (isFolder && n._picked ? `<span class="folder-pick">↳ ${n._picked.name}</span>` : "");
+
+            li.innerHTML = `
+                <div class="qi-info">
+                    <span class="file-name">${icon}${n.name}</span>
+                    ${sub}
+                </div>
+                <span class="duration">${durTxt}</span>
+            `;
+
+            // ❌ supprimer (toujours présent)
+            const delBtn = document.createElement("button");
+            delBtn.className = "delete-btn";
+            delBtn.textContent = "❌";
+            delBtn.title = "Supprimer de la playlist";
+            delBtn.onclick = ev => { ev.stopPropagation(); e.remove(r); UI.renderQueue(); };
+
+            if (isMissing) {
+                // Emplacement non jouable : pas de bouton Play / Mix.
+                if (n._needsPermission && n._handle) {
+                    const rcBtn = document.createElement("button");
+                    rcBtn.className = "reconnect-btn";
+                    rcBtn.title = "Reconnecter (autoriser l'accès au fichier/dossier)";
+                    rcBtn.textContent = "🔌";
+                    rcBtn.onclick = async ev => {
+                        ev.stopPropagation();
+                        const ok = await reconnectItem(r);
+                        if (ok) UI.renderQueue();
+                    };
+                    li.append(rcBtn, delBtn);
+                } else {
+                    li.append(delBtn);
+                }
+            } else {
+                // ▶ jouer immédiatement
+                const playBtn = document.createElement("button");
+                playBtn.className = "play-item-btn";
+                playBtn.title = "Jouer immédiatement";
+                playBtn.textContent = "▶";
+                playBtn.onclick = ev => {
+                    ev.stopPropagation();
+                    const all = e.all();
+                    const item = all.splice(r, 1)[0];
+                    e.set([item, ...all]);
+                    const cur = t.getCurrent();
+                    cur && !cur.paused && a(cur);
+                    t.playNext();
+                    UI.renderQueue();
+                };
+
+                // Éditeur de mix
+                const mixBtn = document.createElement("button");
+                mixBtn.className = "mix-item-btn";
+                mixBtn.title = "Éditeur de mix (points intro / enchaînement)";
+                mixBtn.textContent = "MIX";
+                mixBtn.onclick = ev => { ev.stopPropagation(); openMixEditor(r); };
+
+                // ⧉ dupliquer
+                const dupBtn = document.createElement("button");
+                dupBtn.className = "dup-item-btn";
+                dupBtn.title = "Dupliquer cet élément";
+                dupBtn.textContent = "⧉";
+                dupBtn.onclick = ev => { ev.stopPropagation(); e.duplicate(r); UI.renderQueue(); };
+
+                li.append(playBtn, mixBtn, dupBtn, delBtn);
+            }
+
+            li.addEventListener("dragstart", () => li.classList.add("dragging"));
+            li.addEventListener("dragend", () => li.classList.remove("dragging"));
+            queue.append(li);
+        });
         hint.style.display = e.all().length ? "none" : "flex";
         const np = e.peek();
-        upNext.textContent = np ? (np._isFolder ? "📁 " + np.name + " (aléatoire)" : np.name) : "–";
+        upNext.textContent = np
+            ? (np._isFolder ? "📁 " + np.name + (np._picked ? " → " + np._picked.name : " (aléatoire)") : np.name)
+            : "–";
     },
-    async updateCurrent(e, n) {
-        nowT.textContent = e.name, meta.dataset.total = n;
+    async updateCurrent(file, dur) {
+        nowT.textContent = file.name, meta.dataset.total = dur;
         const r = (new Date).toLocaleTimeString("fr-FR", {
             hour: "2-digit",
             minute: "2-digit"
         });
-        hist.insertAdjacentHTML("afterbegin", `<li>${r} – ${e.name}</li>`);
+        hist.insertAdjacentHTML("afterbegin", `<li>${r} – ${file.name}</li>`);
 
         // Flux live : masquer la progress bar
-        if (!isFinite(n)) {
+        if (!isFinite(dur)) {
             progress.style.display = 'none';
             currentWaveform = null;
+            currentIntroSec = null;
+            introPct = null; fadeEndPct = null;
             setNextCuePct(null);
             return;
         }
@@ -70,27 +152,40 @@ export const UI = {
         // Generate Waveform
         progress.style.display = '';
         currentWaveform = null;
-        setNextCuePct(0.93); // Fallback: ~93% while waveform loads
-        // Draw placeholder
+        currentIntroSec = null;
+        introPct = null; fadeEndPct = null;
+
+        const mix = file._mix;
+        // Points de mix mémorisés : appliqués immédiatement (sans attendre l'onde).
+        if (mix && mix.next != null) setNextCuePct(Math.min(0.999, mix.next / dur));
+        else setNextCuePct(0.93); // repli ~93 % le temps que l'onde se charge
+        if (mix && mix.intro != null) currentIntroSec = mix.intro;
+        applyMixMarkers(mix, dur);
+
         drawWaveform(0);
 
-        if (e && (e instanceof File || e instanceof Blob)) {
+        if (file instanceof File || file instanceof Blob) {
             try {
-                currentWaveform = await Waveform.generate(e, 800);
-                // Detect fade-out start to set a smart NEXT cue point
-                setNextCuePct(detectFadeOutCue(currentWaveform));
+                currentWaveform = await Waveform.getCached(file, 800);
+                if (currentWaveform) {
+                    // Auto-détection du point NEXT seulement (l'intro reste manuelle).
+                    if (!(mix && mix.next != null)) setNextCuePct(detectFadeOutCue(currentWaveform));
+                }
             } catch (err) {
                 console.warn("Waveform gen failed", err);
             }
         }
     },
     clearCurrent() {
-        nowT.textContent = "–", meta.textContent = "", currentWaveform = null, setNextCuePct(null), drawWaveform(0), progress.style.display = ''
+        nowT.textContent = "–", meta.textContent = "", currentWaveform = null, currentIntroSec = null, setNextCuePct(null), drawWaveform(0), progress.style.display = '';
+        introPct = null; fadeEndPct = null;
+        introCd.hidden = true; introCd.classList.remove("blink");
     },
     tick() {
         const e = t.getCurrent();
         if (!e || e.paused) {
             // bar.style.width = "0%";
+            updateIntroCountdown(null);
             if (!window.autoNext) UI.clearCurrent();
         } else if (e.duration) {
             if (isFinite(e.duration)) {
@@ -98,18 +193,18 @@ export const UI = {
                 if (window.nextCuePct !== null && window.autoNext) {
                     const pct = e.currentTime / e.duration;
                     if (pct >= window.nextCuePct) {
-                        const prevPlayer = e;
                         setNextCuePct(null);
-                        t.playNext(false);
-                        a(prevPlayer);
+                        t.advance(e);
                     }
                 }
                 const remaining = e.duration - e.currentTime;
                 meta.textContent = `Durée : ${fmt(meta.dataset.total || e.duration)} | Restant : ${fmt(remaining)}`;
                 drawWaveform(e.currentTime / e.duration);
+                updateIntroCountdown(e);
             } else {
                 // Flux live (durée infinie)
                 meta.textContent = `🔴 EN DIRECT | Écoulé : ${fmt(e.currentTime)}`;
+                updateIntroCountdown(null);
             }
         }
         clock.textContent = (new Date).toLocaleTimeString("fr-FR", {
@@ -123,86 +218,21 @@ export const UI = {
     }
 };
 
-/**
- * Detects where the fade-out begins at the end of a track,
- * following standard radio automation segue logic:
- *  - First handles "net"/hard-cut endings (song plays at full level right
- *    up to the end then stops): the cue is placed at the true end so the
- *    track plays out fully instead of being chopped at the 93% default.
- *  - Otherwise looks for a real fade-out in the last 35% of the track.
- *  - Fallback: total_duration - 4 seconds (≈ 93% for a 3:30 track)
- *
- * @param {Float32Array} waveform  Normalised 0-1 amplitude samples
- * @returns {number}               Cue position as a 0-1 ratio
- */
-function detectFadeOutCue(waveform) {
-    const n = waveform.length;
-
-    // Compute the average level of the "body" (first 60% of the track)
-    // to get a reference loudness, ignoring intro/outro silence.
-    const bodyStart = Math.floor(n * 0.10);
-    const bodyEnd = Math.floor(n * 0.60);
-    let bodySum = 0;
-    for (let i = bodyStart; i < bodyEnd; i++) bodySum += waveform[i];
-    const bodyAvg = bodySum / (bodyEnd - bodyStart);
-
-    // Fade starts when the level drops below this fraction of the body average.
-    const FADE_THRESHOLD = bodyAvg * 0.40; // 40 % of normal loudness
-    // How many consecutive quiet samples confirm the fade (≈ 0.5 s at 800 samples/track)
-    const SUSTAIN = Math.max(8, Math.floor(n * 0.010));
-
-    // ── True end of audio: skip trailing digital silence ──────────────
-    // Many files keep a fraction of a second of near-silence after the last
-    // note; ignore it so the cue lands on the actual end of the sound.
-    const SILENCE = bodyAvg * 0.10;
-    let audioEnd = n - 1;
-    while (audioEnd > bodyEnd && waveform[audioEnd] < SILENCE) audioEnd--;
-
-    // ── 1. Hard-cut ("fin nette") detection ───────────────────────────
-    // If the track is still at full level in the window just before the
-    // audio ends, there was no fade-out — the song stops abruptly. There is
-    // nothing to cross-fade into, so let it play out fully: place the cue
-    // right at the end (after trimming trailing silence). This avoids the
-    // 93% default firing the next track several seconds too early.
-    const tailWin = Math.max(SUSTAIN, Math.floor(n * 0.02));
-    let tailLoud = 0;
-    for (let i = Math.max(bodyEnd, audioEnd - tailWin + 1); i <= audioEnd; i++) {
-        if (waveform[i] >= FADE_THRESHOLD) tailLoud++;
+// Affiche / met à jour le décompte d'intro de la piste en cours.
+// Clignote (classe .blink) dans les 5 dernières secondes de l'intro.
+function updateIntroCountdown(audioEl) {
+    if (!audioEl || currentIntroSec == null || !isFinite(audioEl.duration)) {
+        if (!introCd.hidden) { introCd.hidden = true; introCd.classList.remove("blink"); }
+        return;
     }
-    if (tailLoud >= tailWin * 0.6) {
-        return Math.min(0.999, Math.max(0.80, (audioEnd + 1) / n));
+    const rem = currentIntroSec - audioEl.currentTime;
+    if (rem <= 0 || rem > audioEl.duration) {
+        if (!introCd.hidden) { introCd.hidden = true; introCd.classList.remove("blink"); }
+        return;
     }
-
-    // ── 2. Fade-out detection ─────────────────────────────────────────
-    // Only search in the last 35% of the track.
-    const searchStart = Math.floor(n * 0.65);
-
-    // Scan backwards: find the latest sample above threshold
-    // (= the last "loud" moment before the fade-out)
-    // Use -1 as sentinel so we can detect "nothing found in search window".
-    let lastLoud = -1;
-    for (let i = audioEnd; i >= searchStart; i--) {
-        if (waveform[i] >= FADE_THRESHOLD) { lastLoud = i; break; }
-    }
-
-    // If the entire last 35% is already quiet (no loud sample found),
-    // the fade started before our search window – use the safe fallback
-    // rather than scanning forward from 65% and returning way too early.
-    if (lastLoud === -1) return 0.93;
-
-    // Now scan forward from lastLoud to find where SUSTAIN consecutive
-    // samples stay below threshold (= confirmed start of fade-out).
-    // Floor at 0.80 so the cue never lands before 80% of the track.
-    for (let i = lastLoud; i <= n - SUSTAIN; i++) {
-        let quiet = true;
-        for (let j = 0; j < SUSTAIN; j++) {
-            if (waveform[i + j] >= FADE_THRESHOLD) { quiet = false; break; }
-        }
-        if (quiet) return Math.max(0.80, i / n); // Never trigger before 80%
-    }
-
-    // Fallback: place cue 4 s before the end (estimated from 93%)
-    return 0.93;
+    introCd.hidden = false;
+    introCd.textContent = `🎤 INTRO ${rem < 10 ? rem.toFixed(1) : Math.ceil(rem)} s`;
+    introCd.classList.toggle("blink", rem <= 5);
 }
 
 function drawWaveform(progressPct) {
@@ -227,7 +257,8 @@ function drawWaveform(progressPct) {
         // Draw loading or empty line
         ctx.fillStyle = "#333";
         ctx.fillRect(0, h / 2 - 1, w, 2);
-        // Still draw the cue marker even without waveform data
+        // Still draw the markers even without waveform data
+        drawMixMarkers(ctx, w, h);
         drawCueMarker(ctx, w, h);
         return;
     }
@@ -258,8 +289,50 @@ function drawWaveform(progressPct) {
     }
     ctx.restore();
 
-    // ── NEXT cue point marker ─────────────────────────────────
+    // ── Marqueurs : intro (vert) + fondu de sortie (orange) + NEXT (rouge) ──
+    drawMixMarkers(ctx, w, h);
     drawCueMarker(ctx, w, h);
+}
+
+// Calcule les ratios des marqueurs intro / fondu à partir des points de mix.
+function applyMixMarkers(mix, dur) {
+    introPct = (mix && mix.intro != null && isFinite(dur) && mix.intro > 0) ? mix.intro / dur : null;
+    fadeEndPct = (mix && mix.next != null && mix.fadeOut > 0 && isFinite(dur))
+        ? Math.min(1, (mix.next + mix.fadeOut) / dur) : null;
+}
+
+// Dessine, sur la waveform principale, le point d'intro et le fondu de sortie.
+function drawMixMarkers(ctx, w, h) {
+    // Fondu de sortie : rampe orange de NEXT (haut) à la fin du fondu (bas)
+    if (fadeEndPct !== null && nextCuePct !== null && fadeEndPct > nextCuePct) {
+        const fx = nextCuePct * w, fex = fadeEndPct * w;
+        ctx.save();
+        ctx.fillStyle = 'rgba(245,158,11,0.18)';
+        ctx.beginPath();
+        ctx.moveTo(fx, 0); ctx.lineTo(fex, 0); ctx.lineTo(fex, h); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(fx, 2); ctx.lineTo(fex, h - 2); ctx.stroke();
+        ctx.restore();
+    }
+    // Point d'intro : ligne verte + libellé
+    if (introPct !== null && introPct > 0) {
+        const mx = Math.round(introPct * w);
+        ctx.save();
+        ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, h); ctx.stroke();
+        const tri = 6;
+        ctx.fillStyle = '#22c55e';
+        ctx.beginPath(); ctx.moveTo(mx - tri, 0); ctx.lineTo(mx + tri, 0); ctx.lineTo(mx, tri * 1.4); ctx.closePath(); ctx.fill();
+        ctx.font = 'bold 10px Inter, system-ui, sans-serif';
+        const tw = ctx.measureText('INTRO').width;
+        const lx = Math.min(Math.max(mx, tw / 2 + 4), w - tw / 2 - 4);
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(lx - tw / 2 - 3, 2, tw + 6, 13);
+        ctx.fillStyle = '#22c55e';
+        ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+        ctx.fillText('INTRO', lx, 3);
+        ctx.restore();
+    }
 }
 
 function drawCueMarker(ctx, w, h) {
@@ -360,6 +433,13 @@ waveformCanvas.addEventListener('pointerup', () => {
     if (!isDraggingCue) return;
     isDraggingCue = false;
     waveformCanvas.style.cursor = '';
+    // Mémorise le point NEXT déplacé sur la piste en cours (cohérence éditeur ↔ direct).
+    const f = t.getCurrentFile?.();
+    const cur = t.getCurrent();
+    if (f && cur && isFinite(cur.duration) && nextCuePct != null) {
+        f._mix = f._mix || { intro: null, next: null };
+        f._mix.next = nextCuePct * cur.duration;
+    }
 });
 
 waveformCanvas.addEventListener('pointercancel', () => { isDraggingCue = false; });
@@ -372,7 +452,22 @@ waveformCanvas.addEventListener('contextmenu', evt => {
     if (dist <= CUE_HIT_PX * 2) {
         evt.preventDefault();
         setNextCuePct(null);
+        const f = t.getCurrentFile?.();
+        if (f && f._mix) f._mix.next = null;
     }
+});
+
+// L'éditeur de mix a modifié les points d'une piste : si c'est la piste en
+// cours, on réapplique aussitôt le point NEXT et l'intro en direct.
+document.addEventListener("mixupdated", ev => {
+    const file = ev.detail?.file;
+    const cur = t.getCurrent();
+    if (file && file === t.getCurrentFile?.() && cur && isFinite(cur.duration)) {
+        if (file._mix && file._mix.next != null) setNextCuePct(Math.min(0.999, file._mix.next / cur.duration));
+        currentIntroSec = file._mix && file._mix.intro != null ? file._mix.intro : currentIntroSec;
+        applyMixMarkers(file._mix, cur.duration);
+    }
+    UI.renderQueue();
 });
 
 queue.addEventListener("dragover", (e => {

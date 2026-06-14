@@ -1,4 +1,4 @@
-const CACHE = 'radiobox-autoplay-v1';
+const CACHE = 'radiobox-autoplay-v5';
 const SHELL = [
   '/',
   '/index.html',
@@ -11,7 +11,10 @@ const SHELL = [
   '/js/queue.js',
   '/js/ui.js',
   '/js/waveform.js',
-  '/js/audio-output.js'
+  '/js/audio-output.js',
+  '/js/mix-editor.js',
+  '/js/playlist-io.js',
+  '/js/fs-access.js'
 ];
 
 self.addEventListener('install', e => {
@@ -28,8 +31,20 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
+// Stratégie « réseau d'abord » : on sert toujours la dernière version en ligne,
+// et le cache ne sert que de secours quand l'internaute est hors-ligne.
 self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request))
+    fetch(e.request)
+      .then(res => {
+        // On garde une copie fraîche (même origine uniquement) pour l'offline.
+        if (new URL(e.request.url).origin === location.origin) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });

@@ -88,13 +88,13 @@ body {
 
 /* --- Left Panel (Playlist) --- */
 #left-panel {
-    width: 320px;
+    width: 540px;
     background-color: var(--bg-panel);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     display: flex;
     flex-direction: column;
-    min-width: 250px;
+    min-width: 380px;
     overflow: hidden;
 }
 
@@ -198,13 +198,87 @@ body {
     background-color: var(--bg-element);
 }
 
-.file-name {
+.qi-info {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.file-name {
+    display: block;
+    max-width: 100%;
     font-size: 0.9rem;
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.folder-pick {
+    display: block;
+    max-width: 100%;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.queue-folder .folder-pick {
+    color: #86efac;
+}
+
+.mix-item-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    padding: 4px 9px;
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    transition: background-color 0.2s;
+}
+
+.mix-item-btn:hover {
+    background: var(--accent-hover);
+}
+
+.dup-item-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 1.05rem;
+    line-height: 1;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.dup-item-btn:hover {
+    opacity: 1;
+    color: var(--text-main);
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.reconnect-btn {
+    background: rgba(245, 158, 11, 0.18);
+    border: 1px solid #f59e0b;
+    color: #f59e0b;
+    cursor: pointer;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+    transition: background-color 0.2s;
+}
+
+.reconnect-btn:hover {
+    background: rgba(245, 158, 11, 0.32);
 }
 
 .duration {
@@ -384,7 +458,8 @@ body {
     flex: 1;
     /* Grow to fill space */
     max-height: 220px;
-    /* Constrain height */
+    /* Constrain height — le décompte d'intro est en sur-impression, donc
+       il n'agrandit pas le contenu */
     overflow: hidden;
 }
 
@@ -442,6 +517,9 @@ body {
     width: 100%;
     height: 48px;
     /* Taller for waveform */
+    flex: none;
+    /* Ne pas rétrécir dans le conteneur flex (sinon écrasé à ~1px) */
+    min-height: 48px;
     background-color: var(--bg-element);
     border-radius: 4px;
     overflow: hidden;
@@ -519,6 +597,25 @@ body {
 }
 
 /* ── Audio Output Selector ───────────────────────────────── */
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.output-group {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.out-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
 .audio-output-btn {
     height: 36px;
     padding: 0 14px;
@@ -606,6 +703,49 @@ body {
     font-size: 0.82rem;
 }
 
+/* --- Sauvegarde / chargement playlist --- */
+#playlist-io {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+    background-color: var(--bg-element);
+    flex: none;
+}
+
+.pl-io-btn {
+    flex: 1;
+    height: 34px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background-color: var(--bg-panel);
+    color: var(--text-main);
+    font-family: var(--font-family);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.pl-io-btn:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--text-muted);
+}
+
+/* --- Emplacement à recharger (playlist chargée) --- */
+.queue-missing {
+    border-left-color: #f59e0b;
+    opacity: 0.85;
+}
+
+.queue-missing .file-name {
+    color: var(--text-muted);
+}
+
+.missing-note {
+    color: #f59e0b !important;
+}
+
 /* --- Dossier dans la playlist --- */
 .queue-folder {
     border-left-color: var(--success);
@@ -622,4 +762,345 @@ body {
 
 .queue-url-track .file-name {
     color: #38bdf8;
+}
+
+/* --- Décompte d'intro --- */
+#intro-countdown {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    z-index: 2;
+    padding: 6px 18px;
+    border-radius: 999px;
+    background-color: rgba(34, 197, 94, 0.15);
+    border: 1px solid var(--success);
+    color: var(--success);
+    font-weight: 700;
+    font-size: 1.6rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.03em;
+}
+
+#intro-countdown[hidden] {
+    display: none;
+}
+
+#intro-countdown.blink {
+    background-color: rgba(239, 68, 68, 0.18);
+    border-color: var(--danger);
+    color: var(--danger);
+    animation: introBlink 0.6s steps(2, start) infinite;
+}
+
+@keyframes introBlink {
+    50% { opacity: 0.25; }
+}
+
+/* --- Éditeur de mix (modale) --- */
+#mix-editor-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.mix-editor {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+    width: min(1100px, 96vw);
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    font-family: var(--font-family);
+}
+
+.me-stage {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.me-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+#me-timeline {
+    width: 100%;
+    display: block;
+    background: #1a1a1f;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    touch-action: none;
+    user-select: none;
+}
+
+.me-scrollbar {
+    position: relative;
+    height: 12px;
+    background: var(--bg-element);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    touch-action: none;
+}
+
+.me-scrollbar.hidden {
+    visibility: hidden;
+}
+
+.me-thumb {
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    left: 0;
+    width: 40px;
+    background: var(--text-muted);
+    border-radius: 5px;
+    cursor: grab;
+}
+
+.me-thumb:hover {
+    background: var(--text-main);
+}
+
+.me-thumb:active {
+    cursor: grabbing;
+}
+
+.me-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-element);
+    border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.me-title {
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.me-nav {
+    display: flex;
+    gap: 6px;
+}
+
+.me-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.me-btn:disabled:hover {
+    background: var(--bg-element);
+    border-color: var(--border);
+}
+
+.me-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+}
+
+.me-close:hover {
+    color: var(--text-main);
+    background: var(--bg-hover);
+}
+
+.me-body {
+    padding: 16px 18px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.me-msg,
+.me-loading {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    padding: 12px 4px;
+}
+
+.me-loading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.me-spinner {
+    width: 20px;
+    height: 20px;
+    flex: none;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: meSpin 0.8s linear infinite;
+}
+
+@keyframes meSpin {
+    to { transform: rotate(360deg); }
+}
+
+.me-warn {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.12);
+    border: 1px solid rgba(251, 191, 36, 0.4);
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    padding: 8px 12px;
+    line-height: 1.4;
+}
+
+.me-row {
+    background: var(--bg-element);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+}
+
+.me-row-disabled {
+    opacity: 0.6;
+}
+
+.me-row-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.me-role {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    background: rgba(99, 102, 241, 0.15);
+    padding: 2px 8px;
+    border-radius: 999px;
+    flex: none;
+}
+
+.me-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.9rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.me-times {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    flex: none;
+}
+
+.me-times b {
+    color: var(--text-main);
+}
+
+.me-canvas {
+    width: 100%;
+    height: 80px;
+    display: block;
+    background: #1a1a1f;
+    border-radius: var(--radius-sm);
+    touch-action: none;
+}
+
+.me-overlap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    padding: 2px 4px;
+}
+
+.me-ov-input {
+    width: 64px;
+    height: 28px;
+    background: var(--bg-element);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    text-align: right;
+    padding: 0 6px;
+    font-family: var(--font-family);
+    font-variant-numeric: tabular-nums;
+}
+
+.me-foot {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 14px 18px;
+    border-top: 1px solid var(--border);
+}
+
+.me-stop:hover {
+    background-color: rgba(239, 68, 68, 0.18);
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.me-spacer {
+    flex: 1;
+}
+
+.me-btn {
+    height: 34px;
+    padding: 0 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-element);
+    color: var(--text-main);
+    font-family: var(--font-family);
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.me-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--text-muted);
+}
+
+.me-row-auto {
+    height: 28px;
+    padding: 0 8px;
+    font-size: 0.8rem;
+}
+
+.me-ok {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.me-ok:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
 }

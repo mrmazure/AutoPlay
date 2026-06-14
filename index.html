@@ -26,12 +26,21 @@
     <header id="top-header">
         <div class="logo-container">
             <img alt="Logo" class="logo" src="rt_logo_head.png">
-            <h1 class="title">RadioBox <span class="subtitle">| AutoPlay By MrMazure</span></h1>
+            <h1 class="title">RadioTools <span class="subtitle">| AutoPlay By MrMazure</span></h1>
         </div>
         <div class="header-controls">
-            <button id="audioOutputBtn" class="audio-output-btn" title="Choisir la carte son de sortie de l'automate">
-                🔊 Carte son de sortie
-            </button>
+            <div class="output-group">
+                <span class="out-label">Pré-écoute :</span>
+                <button id="previewOutputBtn" class="audio-output-btn" title="Choisir la carte son de pré-écoute (PFL)">
+                    🎧 Par défaut
+                </button>
+            </div>
+            <div class="output-group">
+                <span class="out-label">Sortie principale :</span>
+                <button id="audioOutputBtn" class="audio-output-btn" title="Choisir la carte son de sortie de l'automate">
+                    🔊 Par défaut
+                </button>
+            </div>
         </div>
     </header>
 
@@ -89,6 +98,11 @@
             </div>
 
             <ul id="queue"></ul>
+
+            <div id="playlist-io">
+                <button id="save-playlist-btn" class="pl-io-btn" title="Sauvegarder la playlist (ordre + points de mix) dans un fichier JSON">💾 Sauver</button>
+                <button id="load-playlist-btn" class="pl-io-btn" title="Charger une playlist depuis un fichier JSON">📂 Charger</button>
+            </div>
         </aside>
 
         <section id="right-panel">
@@ -141,6 +155,9 @@
                     <canvas id="waveform"></canvas>
                     <!-- <div id="progress-bar"></div> -->
                 </div>
+
+                <!-- Décompte d'intro en sur-impression : ne prend pas de place -->
+                <div id="intro-countdown" hidden></div>
             </div>
 
             <div id="up-next">
@@ -150,6 +167,10 @@
             <audio id="player1"></audio>
             <audio id="player2"></audio>
             <audio id="player-stream"></audio>
+            <!-- Pré-écoute (PFL) : routés vers une 2e carte son, hors antenne -->
+            <audio id="player-preview-a"></audio>
+            <audio id="player-preview-b"></audio>
+            <audio id="player-preview-c"></audio>
 
             <div id="history">
                 <h3 class="section-title">Historique</h3>

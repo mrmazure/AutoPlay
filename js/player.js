@@ -9,8 +9,13 @@ const players = [document.getElementById("player1"), document.getElementById("pl
 // to avoid CORS-related muting (browsers silence cross-origin audio routed through
 // createMediaElementSource when the server doesn't send CORS headers).
 const playerStream = document.getElementById("player-stream");
+// Éléments de pré-écoute (PFL) — eux aussi hors du graphe Web Audio master,
+// routables vers une 2e carte son via setSinkId (cf. applyPreviewOutput).
+const previewPlayers = [document.getElementById("player-preview-a"), document.getElementById("player-preview-b"), document.getElementById("player-preview-c")];
+let previewDeviceId = null;
 let streamActive = false;
 let active = 0;
+let currentFile = null; // Objet (File / dossier-picked / item URL) de la piste à l'antenne
 let masterVol = 1;
 let ctx = null;
 let masterGain = null;
@@ -60,10 +65,11 @@ export const setMasterVolume = (vol) => {
     }
 };
 
-export const fadeOut = (player) => new Promise((resolve) => {
+export const fadeOut = (player, seconds = 1) => new Promise((resolve) => {
     if (player.__fading) return resolve();
     player.__fading = true;
-    const step = player.volume / 20;
+    // 20 paliers/s (50 ms) : la durée totale du fondu = `seconds`.
+    const step = player.volume / Math.max(1, seconds * 20);
     const interval = setInterval(() => {
         player.volume = Math.max(0, player.volume - step);
         if (player.volume === 0) {
@@ -106,6 +112,10 @@ function observeSilence(player) {
 
     const check = () => {
         if (triggered || player.paused) return;
+
+        // Une piste suivante a déjà démarré (cette platine n'est plus à l'antenne) :
+        // on arrête de surveiller → la piste sortante joue jusqu'à sa fin, sans fondu.
+        if (players[active] !== player) return;
 
         if (player.duration && player.currentTime < 0.7 * player.duration) {
             scheduleCheck();
@@ -176,9 +186,11 @@ function playNext(manual = false) {
             playerStream.src = '';
             streamActive = false;
         }
+        currentFile = null;
         document.dispatchEvent(new CustomEvent("trackclear"));
         return null;
     }
+    currentFile = nextFile;
 
     // --- Stream URL: use dedicated player, bypasses Web Audio (avoids CORS muting) ---
     if (nextFile._isUrl) {
@@ -278,6 +290,17 @@ function drawVisualizer() {
 }
 
 
+// Déclenche le passage au titre suivant au point NEXT.
+// Par défaut la piste sortante N'EST PAS coupée : elle joue jusqu'à sa fin
+// (chevauchement avec la suivante). Un fondu de sortie n'est appliqué que si
+// la piste définit _mix.fadeOut > 0 (durée du fondu, à partir du point NEXT).
+function advance(prevDeck) {
+    const outFile = currentFile;
+    playNext(false);
+    const fade = outFile && outFile._mix && outFile._mix.fadeOut;
+    if (fade > 0 && prevDeck) fadeOut(prevDeck, fade);
+}
+
 players.forEach(p => {
     p.addEventListener("ended", () => {
         // Only trigger next if this is the ACTIVE player ending naturally.
@@ -301,16 +324,19 @@ players.forEach(p => {
         const pct = p.currentTime / p.duration;
         if (typeof window.nextCuePct === 'number' && window.autoNext && pct >= window.nextCuePct) {
             window.nextCuePct = null; // prevent tick() in ui.js from double-firing
-            const prev = p;
-            playNext(false);
-            fadeOut(prev);
+            advance(p);
         }
     });
 });
 
+// Réinitialise la piste courante quand la lecture est arrêtée/vidée.
+document.addEventListener("trackclear", () => { currentFile = null; });
+
 export const Player = {
     getCurrent: () => streamActive ? playerStream : players[active],
-    playNext: playNext
+    getCurrentFile: () => currentFile,
+    playNext: playNext,
+    advance: advance
 };
 
 export const applyAudioOutput = async (deviceId) => {
@@ -325,4 +351,133 @@ export const applyAudioOutput = async (deviceId) => {
         promises.push(playerStream.setSinkId(deviceId).catch(() => {}));
     }
     if (promises.length > 0) await Promise.all(promises);
+};
+
+// ── Pré-écoute (PFL) ──────────────────────────────────────────────────────
+// Route les deux éléments de pré-écoute vers une carte son distincte.
+export const applyPreviewOutput = async (deviceId) => {
+    previewDeviceId = deviceId;
+    if ('setSinkId' in HTMLAudioElement.prototype) {
+        await Promise.all(previewPlayers.map(p => p.setSinkId(deviceId).catch(() => {})));
+    }
+};
+
+// Lecteur d'arrangement de pré-écoute : joue jusqu'à 3 pistes posées sur une
+// timeline partagée (avec chevauchements), sur la carte PFL, avec tête de
+// lecture et recherche (seek). Chaque piste k utilise l'élément previewPlayers
+// [k % 2] : deux pistes adjacentes ne partagent jamais le même élément.
+let arr = null;
+const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function clearElement(el) {
+    if (!el.__file && !el.src) return;
+    el.pause();
+    el.onloadedmetadata = null;
+    if (el.src) { try { URL.revokeObjectURL(el.src); } catch (_) {} el.removeAttribute('src'); el.load(); }
+    el.__file = null;
+    el.__ready = false;
+    el.__trk = null;
+}
+
+// Assigne un fichier à un élément et le positionne à `localTime`.
+function setElementTrack(el, file, localTime) {
+    if (el.__file === file) {
+        if (el.paused) el.play().catch(() => {});
+        return;
+    }
+    if (el.src) { try { URL.revokeObjectURL(el.src); } catch (_) {} }
+    el.__file = file;
+    el.__ready = false;
+    el.__seekTo = Math.max(0, localTime);
+    el.src = URL.createObjectURL(file);
+    el.load();
+    el.onloadedmetadata = () => {
+        el.__ready = true;
+        try { el.currentTime = clampN(el.__seekTo, 0, el.duration || el.__seekTo); } catch (_) {}
+        el.play().catch(() => {});
+    };
+}
+
+function stopPreview() {
+    if (arr) { arr.cancelled = true; if (arr.raf) cancelAnimationFrame(arr.raf); arr = null; }
+    previewPlayers.forEach(p => { clearElement(p); p.volume = 1; });
+}
+
+/**
+ * Joue un arrangement sur la carte PFL.
+ * Par défaut AUCUN fondu : chaque piste démarre et reste à 100 %, et la piste
+ * sortante joue jusqu'à sa fin même quand la suivante a commencé. Un fondu de
+ * sortie n'est appliqué que si la piste définit `fadeOut > 0` (en secondes,
+ * à partir de son point NEXT).
+ * @param tracks  [{ file, start, dur, next, isLast, fadeOut }]  (temps absolus en s)
+ * @param fromSec position de départ (s) sur la timeline
+ * @param onTick  callback(playheadSec) à chaque frame
+ * @param onEnd   callback() en fin d'arrangement
+ */
+async function playArrangement({ tracks, fromSec = 0, onTick, onEnd }) {
+    stopPreview();
+    const usable = tracks.filter(t => t.file && !t.file._isUrl);
+    if (!usable.length) return;
+    if (previewDeviceId) await applyPreviewOutput(previewDeviceId);
+
+    const end = Math.max(...usable.map(t => t.start + t.dur));
+    const state = { tracks: usable, onTick, onEnd, end, cancelled: false,
+                    base: clampN(fromSec, 0, end), t0: performance.now() / 1000, needSeek: true, raf: null };
+    arr = state;
+
+    const loop = () => {
+        if (!arr || state.cancelled) return;
+        const playhead = state.base + (performance.now() / 1000 - state.t0);
+        if (playhead >= state.end) { onTick?.(state.end); stopPreview(); onEnd?.(); return; }
+
+        state.tracks.forEach((trk, k) => {
+            const el = previewPlayers[k % previewPlayers.length];
+            const local = playhead - trk.start;
+            const fade = trk.fadeOut > 0 ? trk.fadeOut : 0;
+            // Sans fondu : audible jusqu'à la fin du fichier. Avec fondu :
+            // on coupe une fois le fondu terminé (next + fadeOut).
+            const audibleEnd = fade > 0
+                ? Math.min(trk.start + trk.dur, trk.start + trk.next + fade)
+                : trk.start + trk.dur;
+            const active = playhead >= trk.start && playhead < audibleEnd;
+
+            if (active) {
+                if (el.__trk !== k) { el.__trk = k; setElementTrack(el, trk.file, local); }
+                else if (state.needSeek && el.__ready) {
+                    try { el.currentTime = clampN(local, 0, el.duration || local); } catch (_) {}
+                    if (el.paused) el.play().catch(() => {});
+                }
+                // Volume : 100 % par défaut ; fondu de sortie optionnel après NEXT.
+                let g = 1;
+                if (fade > 0) {
+                    const fs = trk.start + trk.next;
+                    if (playhead > fs) g = Math.max(0, 1 - (playhead - fs) / fade);
+                }
+                el.volume = clampN(g, 0, 1);
+            } else if (el.__trk === k) {
+                clearElement(el);
+            }
+        });
+
+        state.needSeek = false;
+        onTick?.(playhead);
+        state.raf = requestAnimationFrame(loop);
+    };
+    state.raf = requestAnimationFrame(loop);
+}
+
+// Déplace la tête de lecture de l'arrangement en cours.
+function seekArrangement(sec) {
+    if (!arr) return;
+    arr.base = clampN(sec, 0, arr.end);
+    arr.t0 = performance.now() / 1000;
+    arr.needSeek = true;
+}
+
+export const Preview = {
+    playArrangement,
+    seek: seekArrangement,
+    stop: stopPreview,
+    isPlaying: () => !!arr,
+    isAvailable: () => 'setSinkId' in HTMLAudioElement.prototype
 };
