@@ -1,4 +1,4 @@
-const CACHE = 'radiobox-autoplay-v5';
+const CACHE = 'radiobox-autoplay-v6';
 const SHELL = [
   '/',
   '/index.html',

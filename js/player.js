@@ -4,7 +4,9 @@ const FADE_MS = 1000;
 const STEP_MS = 50;
 const SIL_RMS = 0.06;
 const SIL_FRM = 10;
-const players = [document.getElementById("player1"), document.getElementById("player2")];
+// Pool de platines : permet à la piste sortante de jouer jusqu'à sa fin
+// (chevauchement) sans jamais être écrasée par la platine de la suivante.
+const players = [document.getElementById("player1"), document.getElementById("player2"), document.getElementById("player3")];
 // Dedicated player for stream URLs — intentionally NOT connected to Web Audio API
 // to avoid CORS-related muting (browsers silence cross-origin audio routed through
 // createMediaElementSource when the server doesn't send CORS headers).
@@ -168,6 +170,13 @@ function observeSilence(player) {
     scheduleCheck();
 }
 
+// Choisit une platine libre (autre que l'active), de préférence inutilisée /
+// en pause / terminée. Évite d'écraser une piste sortante encore en lecture.
+function pickFreeDeck() {
+    const others = players.filter((_, i) => i !== active);
+    return others.find(p => !p.currentSrc || p.paused || p.ended) || others[0];
+}
+
 function playNext(manual = false) {
     // Fade out whatever is currently playing
     if (manual) {
@@ -229,7 +238,7 @@ function playNext(manual = false) {
         streamActive = false;
     }
 
-    const nextPlayer = players[1 - active];
+    const nextPlayer = pickFreeDeck();
     nextPlayer.src = URL.createObjectURL(nextFile);
     nextPlayer.volume = 1;
     nextPlayer.load();
@@ -246,7 +255,7 @@ function playNext(manual = false) {
     };
 
     nextPlayer.play().catch(console.warn);
-    active = 1 - active;
+    active = players.indexOf(nextPlayer);
 
     observeSilence(nextPlayer);
     return nextFile;
